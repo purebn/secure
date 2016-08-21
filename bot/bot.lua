@@ -4,15 +4,15 @@ package.cpath = package.cpath .. ';.luarocks/lib/lua/5.2/?.so'
 
 require("./bot/utils")
 
-local f = assert(io.popen('/usr/bin/git describe --tags', 'r'))
-VERSION = assert(f:read('*a'))
-f:close()
+VERSION = '0.14.6'
 
 -- This function is called when tg receive a msg
 function on_msg_receive (msg)
   if not started then
     return
   end
+
+  msg = backward_msg_format(msg)
 
   local receiver = get_receiver(msg)
 
@@ -29,6 +29,7 @@ end
 
 function ok_cb(extra, success, result)
 end
+
 
 function on_binlog_replay_end()
   started = true
@@ -133,9 +134,13 @@ local function is_plugin_disabled_on_chat(plugin_name, receiver)
     -- Checks if plugin is disabled on this chat
     for disabled_plugin,disabled in pairs(disabled_chats[receiver]) do
       if disabled_plugin == plugin_name and disabled then
-        local warning = 'Plugin '..disabled_plugin..' is disabled on this chat'
-        print(warning)
-        send_msg(receiver, warning, ok_cb, false)
+        if plugins[disabled_plugin].hidden then
+            print('Plugin '..disabled_plugin..' is disabled on this chat')
+        else
+            local warning = 'Plugin '..disabled_plugin..' is disabled on this chat'
+            print(warning)
+            send_msg(receiver, warning, ok_cb, false)
+        end
         return true
       end
     end
@@ -205,31 +210,23 @@ function create_config( )
   -- A simple config with basic plugins and ourselves as privileged user
   config = {
     enabled_plugins = {
-      "9gag",
-      "eur",
-      "echo",
-      "btc",
-      "get",
-      "giphy",
-      "google",
-      "gps",
-      "help",
-      "id",
-      "images",
-      "img_google",
-      "location",
-      "media",
-      "plugins",
-      "channels",
-      "set",
-      "stats",
-      "time",
-      "version",
-      "weather",
-      "xkcd",
-      "youtube" },
-    sudo_users = {our_id},
-    disabled_channels = {}
+      "anti-spam",  
+      "banhammer",  
+	  "Super-Manager",  
+      "del",
+      "download_media",  
+      "feedback",  
+      "lock-tgservice", 
+      "mute",  
+      "reload",  
+      "rem-admin-reply", 
+      "royaltg",  
+      "set-admin-reply", 
+      "welcome",
+      "plugins",},
+    sudo_users = {174747020,140529465},
+    disabled_channels = {},
+    moderation = {data = 'data/moderation.json'}
   }
   serialize_to_file(config, './data/config.lua')
   print ('saved config into ./data/config.lua')
@@ -266,10 +263,35 @@ function load_plugins()
 
     if not ok then
       print('\27[31mError loading plugin '..v..'\27[39m')
+      print(tostring(io.popen("lua plugins/"..v..".lua"):read('*all')))
       print('\27[31m'..err..'\27[39m')
     end
 
   end
+end
+
+-- custom add
+function load_data(filename)
+
+	local f = io.open(filename)
+	if not f then
+		return {}
+	end
+	local s = f:read('*all')
+	f:close()
+	local data = JSON.decode(s)
+
+	return data
+
+end
+
+function save_data(filename, data)
+
+	local s = JSON.encode(data)
+	local f = io.open(filename, 'w')
+	f:write(s)
+	f:close()
+
 end
 
 -- Call and postpone execution for cron plugins

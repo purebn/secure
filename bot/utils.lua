@@ -8,6 +8,7 @@ feedparser = require "feedparser"
 json = (loadfile "./libs/JSON.lua")()
 mimetype = (loadfile "./libs/mimetype.lua")()
 redis = (loadfile "./libs/redis.lua")()
+JSON = (loadfile "./libs/dkjson.lua")()
 
 http.TIMEOUT = 10
 
@@ -21,10 +22,13 @@ function get_receiver(msg)
   if msg.to.type == 'encr_chat' then
     return msg.to.print_name
   end
+  if msg.to.type == 'channel' then
+    return 'channel#id'..msg.to.id
+  end
 end
 
 function is_chat_msg( msg )
-  if msg.to.type == 'chat' then
+  if msg.to.type == 'channel' then
     return true
   end
   return false
@@ -504,19 +508,19 @@ function load_from_file(file, default_data)
     print ('Created file', file)
   else
     print ('Data loaded from file', file)
-    f:close() 
+    f:close()
   end
   return loadfile (file)()
 end
 
 -- See http://stackoverflow.com/a/14899740
 function unescape_html(str)
-  local map = { 
-    ["lt"]  = "<", 
+  local map = {
+    ["lt"]  = "<",
     ["gt"]  = ">",
     ["amp"] = "&",
     ["quot"] = '"',
-    ["apos"] = "'" 
+    ["apos"] = "'"
   }
   new = string.gsub(str, '(&(#?x?)([%d%a]+);)', function(orig, n, s)
     var = map[s] or n == "#" and string.char(s)
@@ -526,3 +530,232 @@ function unescape_html(str)
   end)
   return new
 end
+
+-- Workarrond to format the message as previously was received
+function backward_msg_format (msg)
+  for k,name in ipairs({'from', 'to'}) do
+    local longid = msg[name].id
+    msg[name].id = msg[name].peer_id
+    msg[name].peer_id = longid
+    msg[name].type = msg[name].peer_type
+  end
+  if msg.action and (msg.action.user or msg.action.link_issuer) then
+    local user = msg.action.user or msg.action.link_issuer
+    local longid = user.id
+    user.id = user.peer_id
+    user.peer_id = longid
+    user.type = user.peer_type
+  end
+  return msg
+end
+--Check if this chat is realm or not
+function is_realm(msg)
+  local var = false
+  local realms = 'realms'
+  local data = load_data(_config.moderation.data)
+  local chat = msg.to.id
+  if data[tostring(realms)] then
+    if data[tostring(realms)][tostring(msg.to.id)] then
+       var = true
+       end
+       return var
+  end
+end
+--Check if this chat is a group or not
+function is_group(msg)
+  local var = false
+  local groups = 'groups'
+  local data = load_data(_config.moderation.data)
+  local chat = msg.to.id
+  if data[tostring(groups)] then
+    if data[tostring(groups)][tostring(msg.to.id)] then
+       var = true
+       end
+       return var
+  end
+end
+
+
+function savelog(group, logtxt)
+
+local text = (os.date("[ %c ]=>  "..logtxt.."\n \n"))
+local file = io.open("./data/groups/"..group.."log.txt", "a")
+
+file:write(text)
+
+file:close()
+
+end
+
+function user_print_name(user)
+   if user.print_name then
+      return user.print_name
+   end
+   local text = ''
+   if user.first_name then
+      text = user.last_name..' '
+   end
+   if user.lastname then
+      text = text..user.last_name
+   end
+   return text
+end
+
+--Check if user is the owner of that group or not
+function is_owner(msg)
+  local var = false
+  local data = load_data(_config.moderation.data)
+  local user = msg.from.id
+  
+  if data[tostring(msg.to.id)] then
+    if data[tostring(msg.to.id)]['set_owner'] then
+      if data[tostring(msg.to.id)]['set_owner'] == tostring(user) then
+        var = true
+      end
+    end
+  end
+
+  if data['admins'] then
+    if data['admins'][tostring(user)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == msg.from.id then
+        var = true
+    end
+  end
+  return var
+end
+
+function is_owner2(user_id, group_id)
+  local var = false
+  local data = load_data(_config.moderation.data)
+
+  if data[tostring(group_id)] then
+    if data[tostring(group_id)]['set_owner'] then
+      if data[tostring(group_id)]['set_owner'] == tostring(user_id) then
+        var = true
+      end
+    end
+  end
+  
+  if data['admins'] then
+    if data['admins'][tostring(user_id)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == user_id then
+        var = true
+    end
+  end
+  return var
+end
+
+--Check if user is admin or not
+function is_admin(msg)
+  local var = false
+  local data = load_data(_config.moderation.data)
+  local user = msg.from.id
+  local admins = 'admins'
+  if data[tostring(admins)] then
+    if data[tostring(admins)][tostring(user)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == msg.from.id then
+        var = true
+    end
+  end
+  return var
+end
+
+function is_admin2(user_id)
+  local var = false
+  local data = load_data(_config.moderation.data)
+  local user = user_id
+  local admins = 'admins'
+  if data[tostring(admins)] then
+    if data[tostring(admins)][tostring(user)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == user_id then
+        var = true
+    end
+  end
+  return var
+end
+
+
+
+--Check if user is the mod of that group or not
+function is_momod(msg)
+  local var = false
+  local data = load_data(_config.moderation.data)
+  local user = msg.from.id
+  if data[tostring(msg.to.id)] then
+    if data[tostring(msg.to.id)]['moderators'] then
+      if data[tostring(msg.to.id)]['moderators'][tostring(user)] then
+        var = true
+      end
+    end
+  end
+
+  if data[tostring(msg.to.id)] then
+    if data[tostring(msg.to.id)]['set_owner'] then
+      if data[tostring(msg.to.id)]['set_owner'] == tostring(user) then
+        var = true
+      end
+    end
+  end
+
+  if data['admins'] then
+    if data['admins'][tostring(user)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == msg.from.id then
+        var = true
+    end
+  end
+  return var
+end
+
+function is_momod2(user_id, group_id)
+  local var = false
+  local data = load_data(_config.moderation.data)
+  local usert = user_id
+  if data[tostring(group_id)] then
+    if data[tostring(group_id)]['moderators'] then
+      if data[tostring(group_id)]['moderators'][tostring(usert)] then
+        var = true
+      end
+    end
+  end
+
+  if data[tostring(group_id)] then
+    if data[tostring(group_id)]['set_owner'] then
+      if data[tostring(group_id)]['set_owner'] == tostring(user_id) then
+        var = true
+      end
+    end
+  end
+  
+  if data['admins'] then
+    if data['admins'][tostring(user_id)] then
+      var = true
+    end
+  end
+  for v,user in pairs(_config.sudo_users) do
+    if user == usert then
+        var = true
+    end
+  end
+  return var
+end
+
